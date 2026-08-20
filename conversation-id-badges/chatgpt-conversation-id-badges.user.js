@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.3.2
+// @version      0.3.3
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @description  Shows short canonical conversation-ID badges beside loaded ChatGPT sidebar chats. Badges live in a separate overlay and never modify ChatGPT's conversation-link contents. Click to copy full ID. No network/API calls.
