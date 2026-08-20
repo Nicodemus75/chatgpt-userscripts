@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.4.0
+// @version      0.4.1
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @description  Shows stable short canonical conversation-ID badges in ChatGPT's sidebar without modifying conversation-link contents or using a viewport overlay. Click the badge lane to copy the full ID. No network/API calls.
@@ -35,7 +35,7 @@
     decorated: 'data-cgpt-id-badged',
     conversationId: 'data-cgpt-conversation-id',
     shortId: 'data-cgpt-short-id',
-    originalPaddingRight: 'data-cgpt-original-padding-right',
+    titleTarget: 'data-cgpt-id-title-target',
   });
 
   let scanTimer = null;
@@ -78,7 +78,12 @@
     const rect = link.getBoundingClientRect();
     const right = rect.right - CONFIG.nativeControlLanePx - CONFIG.badgeControlGapPx;
     const left = right - CONFIG.badgeWidthPx;
-    return { left, right, top: rect.top, bottom: rect.bottom };
+    return {
+      left,
+      right,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
   }
 
   function pointInside(bounds, x, y) {
@@ -87,13 +92,22 @@
 
   function installStyles() {
     if (document.getElementById(STYLE_ID)) return;
+
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
       a[${ATTR.decorated}="true"] {
         position: relative !important;
+      }
+
+      /* Reserve badge/control space only inside the title. Never change the
+         conversation row's outer width, padding, flex basis or box sizing;
+         those are owned by ChatGPT and the separate Sidebar Resizer. */
+      a[${ATTR.decorated}="true"] [${ATTR.titleTarget}="true"] {
         box-sizing: border-box !important;
-        padding-right: calc(var(--cgpt-id-original-padding-right, 0px) + ${badgeTotalReservePx()}px) !important;
+        max-width: calc(100% - ${badgeTotalReservePx()}px) !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
       }
 
       a[${ATTR.decorated}="true"]::after {
@@ -156,8 +170,11 @@
       try {
         await navigator.clipboard.writeText(text);
         return true;
-      } catch {}
+      } catch {
+        // Fall through to the legacy clipboard path.
+      }
     }
+
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -166,8 +183,14 @@
     textarea.style.top = '0';
     document.body.appendChild(textarea);
     textarea.select();
+
     let ok = false;
-    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+
     textarea.remove();
     return ok;
   }
@@ -207,12 +230,25 @@
     const currentId = link.getAttribute(ATTR.conversationId);
     if (currentId === id && link.getAttribute(ATTR.decorated) === 'true') return;
 
-    if (!link.hasAttribute(ATTR.originalPaddingRight)) {
-      const computed = window.getComputedStyle(link).paddingRight || '0px';
-      link.setAttribute(ATTR.originalPaddingRight, computed);
-      link.style.setProperty('--cgpt-id-original-padding-right', computed);
-    } else {
-      link.style.setProperty('--cgpt-id-original-padding-right', link.getAttribute(ATTR.originalPaddingRight) || '0px');
+    /* v0.4.0 briefly reserved space by changing link padding. Remove any
+       leftover inline bookkeeping and reserve space on the inner title only. */
+    link.removeAttribute('data-cgpt-original-padding-right');
+    link.style.removeProperty('--cgpt-id-original-padding-right');
+
+    link.querySelectorAll(`[${ATTR.titleTarget}="true"]`).forEach((node) => {
+      node.removeAttribute(ATTR.titleTarget);
+    });
+
+    const titleTarget =
+      link.querySelector('[data-marquee-text]')
+      || link.querySelector('.truncate')
+      || Array.from(link.querySelectorAll('span, div')).find((node) => {
+        const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+        return text && text.length > 1;
+      });
+
+    if (titleTarget instanceof HTMLElement) {
+      titleTarget.setAttribute(ATTR.titleTarget, 'true');
     }
 
     link.setAttribute(ATTR.decorated, 'true');
@@ -226,7 +262,11 @@
       link.removeAttribute(ATTR.decorated);
       link.removeAttribute(ATTR.conversationId);
       link.removeAttribute(ATTR.shortId);
+      link.removeAttribute('data-cgpt-original-padding-right');
       link.style.removeProperty('--cgpt-id-original-padding-right');
+      link.querySelectorAll(`[${ATTR.titleTarget}="true"]`).forEach((node) => {
+        node.removeAttribute(ATTR.titleTarget);
+      });
     });
   }
 
@@ -234,6 +274,7 @@
     scanTimer = null;
     installStyles();
     document.getElementById(LEGACY_OVERLAY_ID)?.remove();
+
     const liveLinks = collectConversationLinks();
     for (const link of liveLinks) decorateLink(link);
     cleanupStaleDecorations(liveLinks);
@@ -247,16 +288,21 @@
   function decoratedLinkFromEvent(event) {
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
     for (const node of path) {
-      if (node instanceof HTMLAnchorElement && node.getAttribute(ATTR.decorated) === 'true') return node;
+      if (node instanceof HTMLAnchorElement && node.getAttribute(ATTR.decorated) === 'true') {
+        return node;
+      }
     }
     const target = event.target instanceof Element ? event.target : null;
     return target?.closest?.(`a[${ATTR.decorated}="true"]`) || null;
   }
 
   function handleBadgeClick(event) {
-    if (!(event instanceof MouseEvent) || event.button !== 0) return;
+    if (!(event instanceof MouseEvent)) return;
+    if (event.button !== 0) return;
+
     const link = decoratedLinkFromEvent(event);
     if (!link) return;
+
     const bounds = badgeBounds(link);
     if (!pointInside(bounds, event.clientX, event.clientY)) return;
 
@@ -266,16 +312,25 @@
 
     const id = link.getAttribute(ATTR.conversationId);
     if (!id) return;
+
     const routingRefRequested = event.ctrlKey || event.metaKey;
     const text = routingRefRequested ? `${CONFIG.routingPrefix}${id}` : id;
+
     void copyText(text).then((copied) => {
-      showToast(copied ? (routingRefRequested ? `Copied routing ref ${CONFIG.badgePrefix}${compactId(id)}` : `Copied conversation ID ${CONFIG.badgePrefix}${compactId(id)}`) : 'Could not copy conversation ID');
+      showToast(
+        copied
+          ? routingRefRequested
+            ? `Copied routing ref ${CONFIG.badgePrefix}${compactId(id)}`
+            : `Copied conversation ID ${CONFIG.badgePrefix}${compactId(id)}`
+          : 'Could not copy conversation ID'
+      );
     });
   }
 
   function startObserver() {
     const target = document.body || document.documentElement;
     if (!target) return;
+
     const observer = new MutationObserver(() => scheduleScan());
     observer.observe(target, {
       childList: true,
@@ -299,6 +354,8 @@
     window.addEventListener('popstate', scheduleScan);
   }
 
+  // Capture-phase click handling lets the pseudo-element behave as an independent
+  // copy target without placing an extra DOM child inside ChatGPT's React-owned link.
   document.addEventListener('click', handleBadgeClick, true);
 
   installStyles();
