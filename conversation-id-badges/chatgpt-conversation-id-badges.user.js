@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.4.1
+// @version      0.4.3
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
-// @description  Shows stable short canonical conversation-ID badges in ChatGPT's sidebar without modifying conversation-link contents or using a viewport overlay. Click the badge lane to copy the full ID. No network/API calls.
+// @description  Shows compact 4-character tags derived from full canonical conversation IDs in ChatGPT's sidebar. Click the badge lane to copy the full ID. No network/API calls.
 // @author       OpenAI / user-specific utility
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -16,12 +16,12 @@
   'use strict';
 
   const CONFIG = Object.freeze({
-    shortLength: 8,
+    shortLength: 4,
     badgePrefix: '#',
     routingPrefix: 'CHATGPT:CLOUD:',
     toastDurationMs: 1400,
     scanDebounceMs: 80,
-    badgeWidthPx: 64,
+    badgeWidthPx: 40,
     nativeControlLanePx: 48,
     badgeControlGapPx: 6,
     rightInsetPx: 4,
@@ -54,9 +54,70 @@
     }
   }
 
-  function compactId(id) {
-    const normalized = id.replace(/[^A-Za-z0-9]/g, '');
-    return normalized.slice(0, CONFIG.shortLength).toUpperCase();
+  const TAG_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+  function fullIdTagSeed(id) {
+    // 64-bit FNV-1a over the entire canonical conversation ID. Conversation
+    // IDs are ASCII-like, so charCodeAt gives a deterministic byte stream.
+    let hash = 14695981039346656037n;
+    const prime = 1099511628211n;
+    for (let i = 0; i < id.length; i += 1) {
+      hash ^= BigInt(id.charCodeAt(i));
+      hash = BigInt.asUintN(64, hash * prime);
+    }
+
+    // Encode the whole 64-bit result in Crockford-style Base32. This gives a
+    // stable tag whose leading characters depend on the whole conversation ID,
+    // rather than on the common UUID prefix visible in many ChatGPT chats.
+    let value = hash;
+    let encoded = '';
+    do {
+      encoded = TAG_ALPHABET[Number(value & 31n)] + encoded;
+      value >>= 5n;
+    } while (value > 0n);
+
+    return encoded.padStart(13, '0');
+  }
+
+  function computeDisplayTags(linkIds) {
+    const seeds = new Map();
+    for (const id of linkIds.values()) {
+      if (!seeds.has(id)) seeds.set(id, fullIdTagSeed(id));
+    }
+
+    const lengths = new Map(Array.from(seeds.keys(), (id) => [id, CONFIG.shortLength]));
+
+    // Four Base32 characters provide 1,048,576 possible visible tags. If two
+    // currently loaded chats ever collide, lengthen only the colliding tags
+    // until they are unique. Their underlying canonical IDs never change.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const groups = new Map();
+      for (const [id, seed] of seeds) {
+        const length = Math.min(lengths.get(id), seed.length);
+        const tag = seed.slice(0, length);
+        if (!groups.has(tag)) groups.set(tag, []);
+        groups.get(tag).push(id);
+      }
+
+      for (const ids of groups.values()) {
+        if (ids.length < 2) continue;
+        for (const id of ids) {
+          const current = lengths.get(id);
+          if (current < seeds.get(id).length) {
+            lengths.set(id, current + 1);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    const tags = new Map();
+    for (const [id, seed] of seeds) {
+      tags.set(id, seed.slice(0, lengths.get(id)));
+    }
+    return tags;
   }
 
   function usableTitleExists(link) {
@@ -122,7 +183,7 @@
         align-items: center !important;
         justify-content: center !important;
         box-sizing: border-box !important;
-        padding: 0 4px !important;
+        padding: 0 3px !important;
         border: 1px solid rgba(128, 128, 128, 0.38) !important;
         border-radius: 5px !important;
         background: rgba(32, 32, 32, 0.88) !important;
@@ -223,12 +284,17 @@
     return links;
   }
 
-  function decorateLink(link) {
+  function decorateLink(link, displayTag) {
     const id = extractConversationId(link.getAttribute('href') || link.href);
     if (!id || !usableTitleExists(link)) return;
 
     const currentId = link.getAttribute(ATTR.conversationId);
-    if (currentId === id && link.getAttribute(ATTR.decorated) === 'true') return;
+    const nextShortId = `${CONFIG.badgePrefix}${displayTag}`;
+    if (
+      currentId === id &&
+      link.getAttribute(ATTR.decorated) === 'true' &&
+      link.getAttribute(ATTR.shortId) === nextShortId
+    ) return;
 
     /* v0.4.0 briefly reserved space by changing link padding. Remove any
        leftover inline bookkeeping and reserve space on the inner title only. */
@@ -239,7 +305,7 @@
       node.removeAttribute(ATTR.titleTarget);
     });
 
-    const titleTarget =
+    const titleLeaf =
       link.querySelector('[data-marquee-text]')
       || link.querySelector('.truncate')
       || Array.from(link.querySelectorAll('span, div')).find((node) => {
@@ -247,13 +313,50 @@
         return text && text.length > 1;
       });
 
-    if (titleTarget instanceof HTMLElement) {
+    /*
+      Pinned and ordinary ChatGPT rows do not use identical title markup.
+      Applying the reserve directly to a narrow leaf (for example a pinned-row
+      .truncate span) can make the visible title much shorter than the row.
+
+      Start at the real title text, then walk upward and use the widest
+      text-bearing wrapper that still belongs to this link. This keeps the
+      reserve relative to the row's expandable title area instead of a
+      pinned-row leaf's intrinsic width.
+    */
+    let titleTarget = titleLeaf instanceof HTMLElement ? titleLeaf : null;
+    if (titleTarget) {
+      const titleText = (titleTarget.textContent || '').replace(/\s+/g, ' ').trim();
+      const linkRect = link.getBoundingClientRect();
+      let node = titleTarget;
+
+      while (node.parentElement && node.parentElement !== link) {
+        const parent = node.parentElement;
+        const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
+        const rect = parent.getBoundingClientRect();
+
+        const textStillMatches =
+          titleText &&
+          parentText &&
+          (parentText === titleText || parentText.includes(titleText));
+
+        const rowLikeHeight =
+          rect.height > 0 &&
+          rect.height <= Math.max(64, linkRect.height * 1.8);
+
+        if (!textStillMatches || !rowLikeHeight) break;
+
+        if (rect.width >= node.getBoundingClientRect().width) {
+          titleTarget = parent;
+        }
+        node = parent;
+      }
+
       titleTarget.setAttribute(ATTR.titleTarget, 'true');
     }
 
     link.setAttribute(ATTR.decorated, 'true');
     link.setAttribute(ATTR.conversationId, id);
-    link.setAttribute(ATTR.shortId, `${CONFIG.badgePrefix}${compactId(id)}`);
+    link.setAttribute(ATTR.shortId, `${CONFIG.badgePrefix}${displayTag}`);
   }
 
   function cleanupStaleDecorations(liveLinks) {
@@ -276,7 +379,13 @@
     document.getElementById(LEGACY_OVERLAY_ID)?.remove();
 
     const liveLinks = collectConversationLinks();
-    for (const link of liveLinks) decorateLink(link);
+    const linkIds = new Map();
+    for (const link of liveLinks) {
+      const id = extractConversationId(link.getAttribute('href') || link.href);
+      if (id) linkIds.set(link, id);
+    }
+    const displayTags = computeDisplayTags(linkIds);
+    for (const [link, id] of linkIds) decorateLink(link, displayTags.get(id));
     cleanupStaleDecorations(liveLinks);
   }
 
@@ -320,8 +429,8 @@
       showToast(
         copied
           ? routingRefRequested
-            ? `Copied routing ref ${CONFIG.badgePrefix}${compactId(id)}`
-            : `Copied conversation ID ${CONFIG.badgePrefix}${compactId(id)}`
+            ? `Copied routing ref ${link.getAttribute(ATTR.shortId) || CONFIG.badgePrefix}`
+            : `Copied conversation ID ${link.getAttribute(ATTR.shortId) || CONFIG.badgePrefix}`
           : 'Could not copy conversation ID'
       );
     });
