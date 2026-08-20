@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.4.4
+// @version      0.4.5
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @description  Shows compact 4-character tags derived from full canonical conversation IDs in ChatGPT's sidebar. Click the badge lane to copy the full ID. No network/API calls.
@@ -30,6 +30,7 @@
 
   const STYLE_ID = 'cgpt-conversation-id-badge-style';
   const TOAST_ID = 'cgpt-conversation-id-badge-toast';
+  const HOVER_TOOLTIP_ID = 'cgpt-conversation-id-hover-tooltip';
   const LEGACY_OVERLAY_ID = 'cgpt-conversation-id-overlay';
   const ATTR = Object.freeze({
     decorated: 'data-cgpt-id-badged',
@@ -39,6 +40,7 @@
   });
 
   let scanTimer = null;
+  let hoveredBadgeLink = null;
 
   function extractConversationId(href) {
     if (!href) return null;
@@ -222,6 +224,25 @@
         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28) !important;
         pointer-events: none !important;
       }
+
+      #${HOVER_TOOLTIP_ID} {
+        position: fixed !important;
+        z-index: 2147483647 !important;
+        max-width: calc(100vw - 16px) !important;
+        padding: 5px 7px !important;
+        border: 1px solid rgba(128, 128, 128, 0.45) !important;
+        border-radius: 6px !important;
+        background: rgba(20, 20, 20, 0.96) !important;
+        color: rgba(245, 245, 245, 0.96) !important;
+        box-shadow: 0 3px 14px rgba(0, 0, 0, 0.28) !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        font-size: 10px !important;
+        line-height: 1.3 !important;
+        white-space: nowrap !important;
+        pointer-events: none !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -263,6 +284,43 @@
     toast.textContent = message;
     document.body.appendChild(toast);
     window.setTimeout(() => toast.remove(), CONFIG.toastDurationMs);
+  }
+
+  function hideBadgeTooltip() {
+    hoveredBadgeLink = null;
+    document.getElementById(HOVER_TOOLTIP_ID)?.remove();
+  }
+
+  function showBadgeTooltip(link) {
+    const id = link.getAttribute(ATTR.conversationId);
+    if (!id) {
+      hideBadgeTooltip();
+      return;
+    }
+
+    if (hoveredBadgeLink === link && document.getElementById(HOVER_TOOLTIP_ID)) return;
+
+    hideBadgeTooltip();
+    hoveredBadgeLink = link;
+
+    const tooltip = document.createElement('div');
+    tooltip.id = HOVER_TOOLTIP_ID;
+    tooltip.textContent = id;
+    document.body.appendChild(tooltip);
+
+    const bounds = badgeBounds(link);
+    const rect = tooltip.getBoundingClientRect();
+    const margin = 8;
+    const gap = 6;
+
+    let left = bounds.right - rect.width;
+    left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+
+    let top = bounds.top - rect.height - gap;
+    if (top < margin) top = Math.min(window.innerHeight - rect.height - margin, bounds.bottom + gap);
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
   }
 
   function findSidebarRoots() {
@@ -405,6 +463,24 @@
     return target?.closest?.(`a[${ATTR.decorated}="true"]`) || null;
   }
 
+  function handleBadgeHover(event) {
+    if (!(event instanceof MouseEvent)) return;
+
+    const link = decoratedLinkFromEvent(event);
+    if (!link) {
+      hideBadgeTooltip();
+      return;
+    }
+
+    const bounds = badgeBounds(link);
+    if (!pointInside(bounds, event.clientX, event.clientY)) {
+      hideBadgeTooltip();
+      return;
+    }
+
+    showBadgeTooltip(link);
+  }
+
   function handleBadgeClick(event) {
     if (!(event instanceof MouseEvent)) return;
     if (event.button !== 0) return;
@@ -465,7 +541,10 @@
 
   // Capture-phase click handling lets the pseudo-element behave as an independent
   // copy target without placing an extra DOM child inside ChatGPT's React-owned link.
+  document.addEventListener('mousemove', handleBadgeHover, true);
   document.addEventListener('click', handleBadgeClick, true);
+  window.addEventListener('scroll', hideBadgeTooltip, true);
+  window.addEventListener('blur', hideBadgeTooltip);
 
   installStyles();
   document.getElementById(LEGACY_OVERLAY_ID)?.remove();
