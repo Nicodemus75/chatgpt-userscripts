@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.4.5
+// @version      0.4.6
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @description  Shows compact 4-character tags derived from full canonical conversation IDs in ChatGPT's sidebar. Click the badge lane to copy the full ID. No network/API calls.
@@ -21,6 +21,7 @@
     routingPrefix: 'CHATGPT:CLOUD:',
     toastDurationMs: 1400,
     scanDebounceMs: 80,
+    activityRefreshDebounceMs: 120,
     badgeWidthPx: 40,
     nativeControlLanePx: 48,
     badgeControlGapPx: 6,
@@ -40,6 +41,7 @@
   });
 
   let scanTimer = null;
+  let activityRefreshTimer = null;
   let hoveredBadgeLink = null;
 
   function extractConversationId(href) {
@@ -331,6 +333,78 @@
     return Array.from(roots);
   }
 
+  function isFirefox() {
+    return /Firefox\//i.test(navigator.userAgent);
+  }
+
+  function nudgeFirefoxSidebarActivityRendering() {
+    if (!isFirefox()) return;
+
+    /*
+      Firefox can occasionally return to a ChatGPT tab with stale sidebar
+      painting/animation state. This is deliberately a local rendering nudge:
+      no polling, no ChatGPT API calls, and no conversation-list requests.
+
+      A synthetic resize gives ChatGPT's own layout listeners a chance to
+      reconcile the sidebar. If a native progress/spinner element already
+      exists, briefly promote it to a compositor layer and explicitly keep its
+      CSS animation running, then restore the original inline styles.
+    */
+    window.dispatchEvent(new Event('resize'));
+
+    const activitySelector = [
+      '[class*="animate-spin"]',
+      '[role="progressbar"]',
+      '[aria-busy="true"]',
+      '[aria-label*="loading" i]',
+      '[aria-label*="working" i]',
+    ].join(', ');
+
+    for (const root of findSidebarRoots()) {
+      // Force Firefox to resolve the current sidebar layout before repainting.
+      void root.getBoundingClientRect();
+
+      root.querySelectorAll(activitySelector).forEach((node) => {
+        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return;
+
+        const oldAnimationPlayState = node.style.animationPlayState;
+        const oldWillChange = node.style.willChange;
+
+        node.style.animationPlayState = 'running';
+        node.style.willChange = oldWillChange
+          ? `${oldWillChange}, transform`
+          : 'transform';
+
+        void node.getBoundingClientRect();
+
+        window.requestAnimationFrame(() => {
+          if (!node.isConnected) return;
+
+          if (oldAnimationPlayState) node.style.animationPlayState = oldAnimationPlayState;
+          else node.style.removeProperty('animation-play-state');
+
+          if (oldWillChange) node.style.willChange = oldWillChange;
+          else node.style.removeProperty('will-change');
+        });
+      });
+    }
+  }
+
+  function scheduleFirefoxSidebarActivityRefresh() {
+    if (!isFirefox()) return;
+    if (activityRefreshTimer !== null) window.clearTimeout(activityRefreshTimer);
+
+    activityRefreshTimer = window.setTimeout(() => {
+      activityRefreshTimer = null;
+      scheduleScan();
+      nudgeFirefoxSidebarActivityRendering();
+
+      // ChatGPT may reconcile its own sidebar shortly after focus/visibility
+      // returns, so perform one bounded second pass rather than polling.
+      window.setTimeout(nudgeFirefoxSidebarActivityRendering, 250);
+    }, CONFIG.activityRefreshDebounceMs);
+  }
+
   function collectConversationLinks() {
     const links = new Set();
     for (const root of findSidebarRoots()) {
@@ -533,10 +607,14 @@
       history[method] = function (...args) {
         const result = original.apply(this, args);
         scheduleScan();
+        scheduleFirefoxSidebarActivityRefresh();
         return result;
       };
     }
-    window.addEventListener('popstate', scheduleScan);
+    window.addEventListener('popstate', () => {
+      scheduleScan();
+      scheduleFirefoxSidebarActivityRefresh();
+    });
   }
 
   // Capture-phase click handling lets the pseudo-element behave as an independent
@@ -545,6 +623,15 @@
   document.addEventListener('click', handleBadgeClick, true);
   window.addEventListener('scroll', hideBadgeTooltip, true);
   window.addEventListener('blur', hideBadgeTooltip);
+
+  // Firefox-only sidebar activity refresh hooks. These are event-driven and
+  // bounded: no timers run continuously and no network requests are made.
+  window.addEventListener('focus', scheduleFirefoxSidebarActivityRefresh, true);
+  window.addEventListener('pageshow', scheduleFirefoxSidebarActivityRefresh);
+  window.addEventListener('online', scheduleFirefoxSidebarActivityRefresh);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) scheduleFirefoxSidebarActivityRefresh();
+  });
 
   installStyles();
   document.getElementById(LEGACY_OVERLAY_ID)?.remove();
