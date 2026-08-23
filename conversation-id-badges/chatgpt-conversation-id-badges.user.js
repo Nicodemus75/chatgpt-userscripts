@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.6.1
+// @version      0.6.2
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
 // @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v060/shared.js
 // @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v060/adapter.js
-// @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v061/view.js
-// @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v061/controller.js
-// @description  Staging rebuild: stable v0.4.6 sidebar badges plus persistent header identity with action-safe width and opaque native-surface title rendering. DOM-only; no ChatGPT API calls.
+// @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v062/adapter.js
+// @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v062/view.js
+// @require      https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/v062/controller.js
+// @description  Staging rebuild: stable v0.4.6 sidebar badges plus persistent header identity with exact sidebar title extraction and hard right-control collision limits. DOM-only; no ChatGPT API calls.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
