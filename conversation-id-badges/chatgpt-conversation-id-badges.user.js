@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.4.6
-// @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
-// @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/main/conversation-id-badges/chatgpt-conversation-id-badges.user.js
-// @description  Shows compact 4-character tags derived from full canonical conversation IDs in ChatGPT's sidebar. Click the badge lane to copy the full ID. No network/API calls.
+// @version      0.5.4
+// @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
+// @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.user.js
+// @description  Shows compact conversation-ID badges in ChatGPT's sidebar and title bar, and restores missing current-chat titles in Project headers. No network/API calls.
 // @author       OpenAI / user-specific utility
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -32,6 +32,10 @@
   const STYLE_ID = 'cgpt-conversation-id-badge-style';
   const TOAST_ID = 'cgpt-conversation-id-badge-toast';
   const HOVER_TOOLTIP_ID = 'cgpt-conversation-id-hover-tooltip';
+  const TITLEBAR_ID = 'cgpt-conversation-titlebar-identity';
+  const TITLEBAR_BADGE_CLASS = 'cgpt-conversation-titlebar-badge';
+  const TITLEBAR_TITLE_CLASS = 'cgpt-conversation-titlebar-title';
+  const TITLEBAR_HOST_ATTR = 'data-cgpt-titlebar-host';
   const LEGACY_OVERLAY_ID = 'cgpt-conversation-id-overlay';
   const ATTR = Object.freeze({
     decorated: 'data-cgpt-id-badged',
@@ -43,6 +47,9 @@
   let scanTimer = null;
   let activityRefreshTimer = null;
   let hoveredBadgeLink = null;
+  let hoveredTitlebarBadge = null;
+  let learnedNativeChatTitleColor = '';
+  let titlebarMount = null;
 
   function extractConversationId(href) {
     if (!href) return null;
@@ -191,7 +198,7 @@
         border: 1px solid rgba(128, 128, 128, 0.38) !important;
         border-radius: 5px !important;
         background: rgba(32, 32, 32, 0.88) !important;
-        color: rgba(235, 235, 235, 0.88) !important;
+        color: rgba(235, 235, 235, 235, 0.88) !important;
         opacity: 0.72 !important;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
         font-size: 9px !important;
@@ -245,6 +252,80 @@
         user-select: none !important;
         -webkit-user-select: none !important;
       }
+
+
+      #${TITLEBAR_ID} {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        width: auto !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+        margin-left: 7px !important;
+        margin-right: auto !important;
+        gap: 7px !important;
+        position: relative !important;
+        z-index: 2 !important;
+        vertical-align: middle !important;
+        color: inherit !important;
+        font: inherit !important;
+        line-height: inherit !important;
+      }
+
+      #${TITLEBAR_ID} .${TITLEBAR_TITLE_CLASS} {
+        display: block !important;
+        text-align: left !important;
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        max-width: calc(100% - ${CONFIG.badgeWidthPx + 14}px) !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+        box-sizing: border-box !important;
+        padding: 2px 4px !important;
+        border-radius: 5px !important;
+        background: var(--main-surface-primary, var(--background-primary, Canvas)) !important;
+        color: var(--cgpt-native-chat-title-color, var(--text-secondary, rgba(180, 180, 180, 0.95))) !important;
+        opacity: 1 !important;
+        font: inherit !important;
+        line-height: inherit !important;
+        cursor: default !important;
+      }
+
+      #${TITLEBAR_ID} .${TITLEBAR_BADGE_CLASS} {
+        flex: 0 0 auto !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-width: ${CONFIG.badgeWidthPx}px !important;
+        height: 18px !important;
+        box-sizing: border-box !important;
+        padding: 0 4px !important;
+        border: 1px solid rgba(128, 128, 128, 0.38) !important;
+        border-radius: 5px !important;
+        background: rgba(32, 32, 32, 0.88) !important;
+        color: rgba(235, 235, 235, 0.88) !important;
+        opacity: 0.72 !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        font-size: 9px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.02em !important;
+        line-height: 16px !important;
+        white-space: nowrap !important;
+        cursor: copy !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+      }
+
+      #${TITLEBAR_ID} .${TITLEBAR_BADGE_CLASS}:hover {
+        opacity: 0.94 !important;
+        background: rgba(55, 55, 55, 0.96) !important;
+        border-color: rgba(160, 160, 160, 0.76) !important;
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -290,6 +371,7 @@
 
   function hideBadgeTooltip() {
     hoveredBadgeLink = null;
+    hoveredTitlebarBadge = null;
     document.getElementById(HOVER_TOOLTIP_ID)?.remove();
   }
 
@@ -301,341 +383,128 @@
     }
 
     if (hoveredBadgeLink === link && document.getElementById(HOVER_TOOLTIP_ID)) return;
-
     hideBadgeTooltip();
     hoveredBadgeLink = link;
-
     const tooltip = document.createElement('div');
     tooltip.id = HOVER_TOOLTIP_ID;
     tooltip.textContent = id;
     document.body.appendChild(tooltip);
-
     const bounds = badgeBounds(link);
     const rect = tooltip.getBoundingClientRect();
     const margin = 8;
     const gap = 6;
-
     let left = bounds.right - rect.width;
     left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
 
     let top = bounds.top - rect.height - gap;
     if (top < margin) top = Math.min(window.innerHeight - rect.height - margin, bounds.bottom + gap);
-
     tooltip.style.left = `${Math.round(left)}px`;
     tooltip.style.top = `${Math.round(top)}px`;
   }
 
-  function findSidebarRoots() {
-    const roots = new Set();
-    document.querySelectorAll('nav').forEach((node) => roots.add(node));
-    document.querySelectorAll('aside').forEach((node) => roots.add(node));
-    document.querySelectorAll('[class*="sidebar" i]').forEach((node) => roots.add(node));
-    return Array.from(roots);
+  function cleanText(value) {
+    return (value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function isFirefox() {
-    return /Firefox\//i.test(navigator.userAgent);
+  function normalizeSidebarTitleText(value) {
+    const normalized = cleanText(value);
+    if (!normalized) return '';
+
+    return cleanText(
+      normalized
+        .replace(/\s*(Pinned|Archived|Selected)\s*$/i, '')
+        .replace(/\s,\s*(pinned|archived)\s+conversation\s*$/i, '')
+        .replace(/\s+(pinned|archived)\s+conversation\s*$/i, '')
+    );
   }
 
-  function nudgeFirefoxSidebarActivityRendering() {
-    if (!isFirefox()) return;
+  function isSidebarMetaElement(element) {
+    if (!(element instanceof HTMLElement)) return false;
 
-    /*
-      Firefox can occasionally return to a ChatGPT tab with stale sidebar
-      painting/animation state. This is deliberately a local rendering nudge:
-      no polling, no ChatGPT API calls, and no conversation-list requests.
+    const className = typeof element.className === 'string' ? element.className : '';
+    const testId = element.getAttribute('data-testid') || '';
+    const ariaLabel = element.getAttribute('aria-label') || '';
+    const text = cleanText(element.textContent);
+    const fingerprint = [className, testId, ariaLabel, text].join(' ');
 
-      A synthetic resize gives ChatGPT's own layout listeners a chance to
-      reconcile the sidebar. If a native progress/spinner element already
-      exists, briefly promote it to a compositor layer and explicitly keep its
-      CSS animation running, then restore the original inline styles.
-    */
-    window.dispatchEvent(new Event('resize'));
+    if (/(pin|pinned|meta|timestamp|time|date|badge|icon)/i.test(fingerprint)) return true;
+    return /^(Pinned|Archived|Selected|\d+[smhdwy]\s+ago)$/i.test(text);
+  }
 
-    const activitySelector = [
-      '[class*="animate-spin"]',
-      '[role="progressbar"]',
-      '[aria-busy="true"]',
-      '[aria-label*="loading" i]',
-      '[aria-label*="working" i]',
-    ].join(', ');
+  function currentConversationLink(id) {
+    if (!id) return null;
 
-    for (const root of findSidebarRoots()) {
-      // Force Firefox to resolve the current sidebar layout before repainting.
-      void root.getBoundingClientRect();
-
-      root.querySelectorAll(activitySelector).forEach((node) => {
-        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return;
-
-        const oldAnimationPlayState = node.style.animationPlayState;
-        const oldWillChange = node.style.willChange;
-
-        node.style.animationPlayState = 'running';
-        node.style.willChange = oldWillChange
-          ? `${oldWillChange}, transform`
-          : 'transform';
-
-        void node.getBoundingClientRect();
-
-        window.requestAnimationFrame(() => {
-          if (!node.isConnected) return;
-
-          if (oldAnimationPlayState) node.style.animationPlayState = oldAnimationPlayState;
-          else node.style.removeProperty('animation-play-state');
-
-          if (oldWillChange) node.style.willChange = oldWillChange;
-          else node.style.removeProperty('will-change');
-        });
-      });
+    const roots = findSidebarRoots();
+    for (const root of roots) {
+      const links = root.querySelectorAll('a[href*="/c/"]');
+      for (const link of links) {
+        if (extractConversationId(link.getAttribute('href') || link.href) === id) return link;
+      }
     }
+
+    return null;
   }
 
-  function scheduleFirefoxSidebarActivityRefresh() {
-    if (!isFirefox()) return;
-    if (activityRefreshTimer !== null) window.clearTimeout(activityRefreshTimer);
+  function conversationTitleFromLink(link) {
+    if (!(link instanceof HTMLAnchorElement)) return '';
 
-    activityRefreshTimer = window.setTimeout(() => {
-      activityRefreshTimer = null;
-      scheduleScan();
-      nudgeFirefoxSidebarActivityRendering();
+    const explicit = link.querySelector('[data-testid="conversation-title"], [data-testid="thread-title"]');
+    const marquee = link.querySelector('[data-marquee-text]');
+    const truncate = link.querySelector('.truncate');
 
-      // ChatGPT may reconcile its own sidebar shortly after focus/visibility
-      // returns, so perform one bounded second pass rather than polling.
-      window.setTimeout(nudgeFirefoxSidebarActivityRendering, 250);
-    }, CONFIG.activityRefreshDebounceMs);
-  }
-
-  function collectConversationLinks() {
-    const links = new Set();
-    for (const root of findSidebarRoots()) {
-      root.querySelectorAll('a[href*="/c/"]').forEach((link) => {
-        const id = extractConversationId(link.getAttribute('href') || link.href);
-        if (id) links.add(link);
-      });
+    for (const node of [explicit, marquee, truncate]) {
+      if (!(node instanceof HTMLElement) || isSidebarMetaElement(node)) continue;
+      const value = normalizeSidebarTitleText(node.textContent);
+      if (value && value.toLowerCase() !== 'new chat') return value;
     }
-    return links;
+
+    const candidates = Array.from(link.querySelectorAll('span, div, p'))
+      .filter((node) => node instanceof HTMLElement)
+      .filter((node) => !isSidebarMetaElement(node))
+      .filter((node) => !node.querySelector('button, a, [role="button"], svg, img'))
+      .map((node) => normalizeSidebarTitleText(node.textContent))
+      .filter((value) => value && value.toLowerCase() !== 'new chat')
+      .sort((a, b) => b.length - a.length);
+
+    if (candidates.length) return candidates[0];
+
+    const aria = normalizeSidebarTitleText(link.getAttribute('aria-label') || link.getAttribute('title'));
+    if (aria && aria.toLowerCase() !== 'new chat') return aria;
+
+    return '';
   }
 
-  function decorateLink(link, displayTag) {
-    const id = extractConversationId(link.getAttribute('href') || link.href);
-    if (!id || !usableTitleExists(link)) return;
+  function titleFromDocument(projectText = '') {
+    let title = cleanText(document.title);
+    if (!title) return '';
 
-    const currentId = link.getAttribute(ATTR.conversationId);
-    const nextShortId = `${CONFIG.badgePrefix}${displayTag}`;
-    if (
-      currentId === id &&
-      link.getAttribute(ATTR.decorated) === 'true' &&
-      link.getAttribute(ATTR.shortId) === nextShortId
-    ) return;
+    title = title.replace(/\s+[-–—|]\s+ChatGPT\s*$/i, '').trim();
+    if (!title || /^ChatGPT$/i.test(title)) return '';
 
-    /* v0.4.0 briefly reserved space by changing link padding. Remove any
-       leftover inline bookkeeping and reserve space on the inner title only. */
-    link.removeAttribute('data-cgpt-original-padding-right');
-    link.style.removeProperty('--cgpt-id-original-padding-right');
-
-    link.querySelectorAll(`[${ATTR.titleTarget}="true"]`).forEach((node) => {
-      node.removeAttribute(ATTR.titleTarget);
-    });
-
-    const titleLeaf =
-      link.querySelector('[data-marquee-text]')
-      || link.querySelector('.truncate')
-      || Array.from(link.querySelectorAll('span, div')).find((node) => {
-        const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-        return text && text.length > 1;
-      });
-
-    /*
-      Pinned and ordinary ChatGPT rows do not use identical title markup.
-      Applying the reserve directly to a narrow leaf (for example a pinned-row
-      .truncate span) can make the visible title much shorter than the row.
-
-      Start at the real title text, then walk upward and use the widest
-      text-bearing wrapper that still belongs to this link. This keeps the
-      reserve relative to the row's expandable title area instead of a
-      pinned-row leaf's intrinsic width.
-    */
-    let titleTarget = titleLeaf instanceof HTMLElement ? titleLeaf : null;
-    if (titleTarget) {
-      const titleText = (titleTarget.textContent || '').replace(/\s+/g, ' ').trim();
-      const linkRect = link.getBoundingClientRect();
-      let node = titleTarget;
-
-      while (node.parentElement && node.parentElement !== link) {
-        const parent = node.parentElement;
-        const parentText = (parent.textContent || '').replace(/\s+/g, ' ').trim();
-        const rect = parent.getBoundingClientRect();
-
-        const textStillMatches =
-          titleText &&
-          parentText &&
-          (parentText === titleText || parentText.includes(titleText));
-
-        const rowLikeHeight =
-          rect.height > 0 &&
-          rect.height <= Math.max(64, linkRect.height * 1.8);
-
-        if (!textStillMatches || !rowLikeHeight) break;
-
-        if (rect.width >= node.getBoundingClientRect().width) {
-          titleTarget = parent;
+    const project = cleanText(projectText);
+    if (project) {
+      const separators = [' - ', ' – ', ' — ', ' | ', ' / '];
+      for (const separator of separators) {
+        const prefix = `${project}${separator}`;
+        if (title.toLowerCase().startsWith(prefix.toLowerCase())) {
+          title = title.slice(prefix.length).trim();
+          break;
         }
-        node = parent;
       }
 
-      titleTarget.setAttribute(ATTR.titleTarget, 'true');
+      if (title.toLowerCase() === project.toLowerCase()) return '';
     }
 
-    link.setAttribute(ATTR.decorated, 'true');
-    link.setAttribute(ATTR.conversationId, id);
-    link.setAttribute(ATTR.shortId, `${CONFIG.badgePrefix}${displayTag}`);
+    return title;
   }
 
-  function cleanupStaleDecorations(liveLinks) {
-    document.querySelectorAll(`a[${ATTR.decorated}="true"]`).forEach((link) => {
-      if (liveLinks.has(link) && link.isConnected) return;
-      link.removeAttribute(ATTR.decorated);
-      link.removeAttribute(ATTR.conversationId);
-      link.removeAttribute(ATTR.shortId);
-      link.removeAttribute('data-cgpt-original-padding-right');
-      link.style.removeProperty('--cgpt-id-original-padding-right');
-      link.querySelectorAll(`[${ATTR.titleTarget}="true"]`).forEach((node) => {
-        node.removeAttribute(ATTR.titleTarget);
-      });
-    });
-  }
+  function headerTextContainsConversationTitle(nativeText, title) {
+    const haystack = cleanText(nativeText).toLowerCase();
+    const needle = cleanText(title).toLowerCase();
+    if (!Kaystack || !needle) return false;
+    if (haystack === needle) return true;
 
-  function scan() {
-    scanTimer = null;
-    installStyles();
-    document.getElementById(LEGACY_OVERLAY_ID)?.remove();
-
-    const liveLinks = collectConversationLinks();
-    const linkIds = new Map();
-    for (const link of liveLinks) {
-      const id = extractConversationId(link.getAttribute('href') || link.href);
-      if (id) linkIds.set(link, id);
-    }
-    const displayTags = computeDisplayTags(linkIds);
-    for (const [link, id] of linkIds) decorateLink(link, displayTags.get(id));
-    cleanupStaleDecorations(liveLinks);
-  }
-
-  function scheduleScan() {
-    if (scanTimer !== null) window.clearTimeout(scanTimer);
-    scanTimer = window.setTimeout(scan, CONFIG.scanDebounceMs);
-  }
-
-  function decoratedLinkFromEvent(event) {
-    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
-    for (const node of path) {
-      if (node instanceof HTMLAnchorElement && node.getAttribute(ATTR.decorated) === 'true') {
-        return node;
-      }
-    }
-    const target = event.target instanceof Element ? event.target : null;
-    return target?.closest?.(`a[${ATTR.decorated}="true"]`) || null;
-  }
-
-  function handleBadgeHover(event) {
-    if (!(event instanceof MouseEvent)) return;
-
-    const link = decoratedLinkFromEvent(event);
-    if (!link) {
-      hideBadgeTooltip();
-      return;
-    }
-
-    const bounds = badgeBounds(link);
-    if (!pointInside(bounds, event.clientX, event.clientY)) {
-      hideBadgeTooltip();
-      return;
-    }
-
-    showBadgeTooltip(link);
-  }
-
-  function handleBadgeClick(event) {
-    if (!(event instanceof MouseEvent)) return;
-    if (event.button !== 0) return;
-
-    const link = decoratedLinkFromEvent(event);
-    if (!link) return;
-
-    const bounds = badgeBounds(link);
-    if (!pointInside(bounds, event.clientX, event.clientY)) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
-
-    const id = link.getAttribute(ATTR.conversationId);
-    if (!id) return;
-
-    const routingRefRequested = event.ctrlKey || event.metaKey;
-    const text = routingRefRequested ? `${CONFIG.routingPrefix}${id}` : id;
-
-    void copyText(text).then((copied) => {
-      showToast(
-        copied
-          ? routingRefRequested
-            ? `Copied routing ref ${link.getAttribute(ATTR.shortId) || CONFIG.badgePrefix}`
-            : `Copied conversation ID ${link.getAttribute(ATTR.shortId) || CONFIG.badgePrefix}`
-          : 'Could not copy conversation ID'
-      );
-    });
-  }
-
-  function startObserver() {
-    const target = document.body || document.documentElement;
-    if (!target) return;
-
-    const observer = new MutationObserver(() => scheduleScan());
-    observer.observe(target, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['href', 'class', 'style'],
-      characterData: true,
-    });
-  }
-
-  function hookSpaNavigation() {
-    for (const method of ['pushState', 'replaceState']) {
-      const original = history[method];
-      if (typeof original !== 'function') continue;
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        scheduleScan();
-        scheduleFirefoxSidebarActivityRefresh();
-        return result;
-      };
-    }
-    window.addEventListener('popstate', () => {
-      scheduleScan();
-      scheduleFirefoxSidebarActivityRefresh();
-    });
-  }
-
-  // Capture-phase click handling lets the pseudo-element behave as an independent
-  // copy target without placing an extra DOM child inside ChatGPT's React-owned link.
-  document.addEventListener('mousemove', handleBadgeHover, true);
-  document.addEventListener('click', handleBadgeClick, true);
-  window.addEventListener('scroll', hideBadgeTooltip, true);
-  window.addEventListener('blur', hideBadgeTooltip);
-
-  // Firefox-only sidebar activity refresh hooks. These are event-driven and
-  // bounded: no timers run continuously and no network requests are made.
-  window.addEventListener('focus', scheduleFirefoxSidebarActivityRefresh, true);
-  window.addEventListener('pageshow', scheduleFirefoxSidebarActivityRefresh);
-  window.addEventListener('online', scheduleFirefoxSidebarActivityRefresh);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) scheduleFirefoxSidebarActivityRefresh();
-  });
-
-  installStyles();
-  document.getElementById(LEGACY_OVERLAY_ID)?.remove();
-  scan();
-  startObserver();
-  hookSpaNavigation();
-})();
+    // For normal multi-word conversation titles, a literal normalized match is
+    // stronger than breadcrumb parsing and correctly recognizes ChatGPT's
+    // project/title/Work layouts even when separators are nested DOM nodes.
+    const wordCount = needle.split(/\s+/)ECB1�ADEHM
