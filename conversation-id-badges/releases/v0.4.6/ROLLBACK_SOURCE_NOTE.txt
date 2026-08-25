@@ -1,0 +1,4 @@
+v0.4.6 is the last pre-header-title ChatGPT Conversation ID Badges release.
+It contains the working sidebar badge implementation plus the bounded Firefox sidebar-activity refresh experiment.
+The first title-header work began in v0.5.0.
+This release is retained as the rollback baseline.
