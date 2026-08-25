@@ -1,0 +1,1 @@
+Exact pre-header rollback baseline is the v0.4.6 implementation originally published on main before v0.5.0 began title-header work. The working behavior at this point was sidebar conversation-ID badges plus the bounded Firefox sidebar activity refresh experiment; no title-header restoration code existed.
