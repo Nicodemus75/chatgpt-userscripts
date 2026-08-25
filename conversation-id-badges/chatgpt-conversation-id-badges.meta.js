@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         ChatGPT Conversation ID Badges
 // @namespace    churchill-ai-tools
-// @version      0.6.10
+// @version      0.6.11
 // @updateURL    https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.meta.js
 // @downloadURL  https://raw.githubusercontent.com/Nicodemus75/chatgpt-userscripts/conversation-id-badges-testing/conversation-id-badges/chatgpt-conversation-id-badges.user.js
-// @description  Staging rebuild: stable sidebar badges plus persistent header identity. v0.6.10 keeps the collision fail-safe and prevents delayed duplicate titles when ChatGPT's native title appears after initial mount.
+// @description  Rollback release: exact pre-header v0.4.6 behavior; sidebar conversation-ID badges remain, title-header code is removed.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
